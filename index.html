@@ -921,7 +921,7 @@ function einfacherHash(text){
 }
 
 const BARRY_SCHEMA_VERSION = 1; // muss VOR ladeState() definiert sein (temporal dead zone)
-const BARRY_APP_VERSION = '1.4';
+const BARRY_APP_VERSION = '1.7.1';
 let state = ladeState();
 // Internes Datenschema von BARRY selbst (unabhängig vom RHS-Austauschformat-Schema).
 // Bei künftigen strukturellen Änderungen am state-Objekt: Versionsnummer hochzählen und
@@ -1021,6 +1021,7 @@ function zeigeToast(text){
    LOGIN
    ========================================================= */
 let loginEingabe = '';
+let loginHinweis = ''; // neutraler Hinweis, z. B. nach einem Import
 let loginFehler = '';
 let loginSchrittNeuesPasswort = null; // personId, wenn Erstpasswort geändert werden muss
 
@@ -1060,6 +1061,7 @@ function renderLogin(){
       <datalist id="in-person-liste">${aktive.map(p=>`<option value="${esc(p.name)}">${p.benutzername?`Benutzername: ${esc(p.benutzername)}`:''}</option>`).join('')}</datalist>
     </div>
     <div class="field"><label>Passwort</label><input type="password" id="in-pw" autofocus></div>
+    ${loginHinweis?`<div class="card card-pad" style="background:var(--soft);border:none;margin-bottom:12px"><p class="hint" style="margin:0">${esc(loginHinweis)}</p></div>`:''}
     ${loginFehler?`<p class="hint" style="color:var(--accent-ink)">${esc(loginFehler)}</p>`:''}
     <button class="btn btn-primary" id="btn-anmelden" style="width:100%">Anmelden</button>
     <p class="hint" style="margin-top:14px">Beim Tippen erscheinen passende Namen zur Auswahl. Wer einen Benutzernamen hat, kann diesen statt des vollen Namens eingeben. Erstzugang erhältst du von der Leitung. Alle Daten bleiben ausschließlich auf diesem Gerät.</p>
@@ -1092,7 +1094,7 @@ function bindLogin(){
     if(!p || p.passwortHash !== einfacherHash(pw)){
       loginFehler = 'Name/Benutzername oder Passwort stimmt nicht.'; render(); return;
     }
-    loginFehler='';
+    loginFehler=''; loginHinweis='';
     if(p.mussPasswortAendern){ loginSchrittNeuesPasswort = p.id; render(); return; }
     session = { personId:p.id };
     render();
@@ -1763,7 +1765,9 @@ function bindTabDatensicherung(){
       const roh = localStorage.getItem(STORAGE_KEY+'-vor-import-backup');
       state = migriereState(Object.assign(leererState(), JSON.parse(roh)));
       speichereState();
-      zeigeToast('Vorheriger Stand wiederhergestellt.');
+      session = null; loginEingabe = ''; loginFehler = '';
+        loginHinweis = 'Der vorherige Datenbestand wurde wiederhergestellt. Bitte melden Sie sich jetzt mit einer Person aus dem neuen Bestand an (Name oder Benutzername). Zugänge aus dem vorherigen Bestand – z. B. „Admin“ – gelten nicht mehr. Bei importierten Personen gilt das Startpasswort, das Ihnen die Leitung mitgeteilt hat.';
+        zeigeToast('Vorheriger Stand wiederhergestellt.');
       render();
     }catch(e){ alert('Sicherheitskopie konnte nicht gelesen werden.'); }
   };
@@ -1795,6 +1799,8 @@ function bindTabDatensicherung(){
         try{ localStorage.setItem(STORAGE_KEY+'-vor-import-backup', JSON.stringify(state)); }catch(e){ /* Backup optional, Import trotzdem versuchen */ }
         state = migriereState(Object.assign(leererState(), parsed));
         speichereState();
+        session = null; loginEingabe = ''; loginFehler = '';
+        loginHinweis = 'Der Datenbestand wurde ersetzt. Bitte melden Sie sich jetzt mit einer Person aus dem neuen Bestand an (Name oder Benutzername). Zugänge aus dem vorherigen Bestand – z. B. „Admin“ – gelten nicht mehr. Bei importierten Personen gilt das Startpasswort, das Ihnen die Leitung mitgeteilt hat.';
         zeigeToast('Bestand importiert. Vorheriger Stand wurde als Sicherheitskopie abgelegt.');
         render();
       }catch(err){
