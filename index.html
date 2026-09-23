@@ -921,7 +921,7 @@ function einfacherHash(text){
 }
 
 const BARRY_SCHEMA_VERSION = 1; // muss VOR ladeState() definiert sein (temporal dead zone)
-const BARRY_APP_VERSION = '1.7.1';
+const BARRY_APP_VERSION = '1.8';
 let state = ladeState();
 // Internes Datenschema von BARRY selbst (unabhängig vom RHS-Austauschformat-Schema).
 // Bei künftigen strukturellen Änderungen am state-Objekt: Versionsnummer hochzählen und
@@ -1039,6 +1039,11 @@ function findePersonFuerLogin(eingabe){
   if(perName.length>1) return {person:null, mehrdeutig:true};
   return {person:null, mehrdeutig:false};
 }
+// Erststart: nur der vorläufige Zugang „Admin“ existiert, noch keine Daten auf diesem Gerät.
+function istErststartOhneDaten(){
+  return state.personen.length===1 && state.personen[0].name==='Admin' && state.personen[0].mussPasswortAendern
+    && !state.hunde.length && !state.termine.length && !state.einsaetze.length;
+}
 function renderLogin(){
   if(loginSchrittNeuesPasswort){
     const p = state.personen.find(x=>x.id===loginSchrittNeuesPasswort);
@@ -1064,6 +1069,12 @@ function renderLogin(){
     ${loginHinweis?`<div class="card card-pad" style="background:var(--soft);border:none;margin-bottom:12px"><p class="hint" style="margin:0">${esc(loginHinweis)}</p></div>`:''}
     ${loginFehler?`<p class="hint" style="color:var(--accent-ink)">${esc(loginFehler)}</p>`:''}
     <button class="btn btn-primary" id="btn-anmelden" style="width:100%">Anmelden</button>
+    ${istErststartOhneDaten()?`
+    <div class="card card-pad" style="background:var(--soft);border:none;margin-top:16px">
+      <strong>Erste Einrichtung auf diesem Gerät</strong>
+      <p class="hint" style="margin:6px 0 10px">Sie haben von Ihrer Staffelleitung eine Datendatei erhalten? Dann importieren Sie sie hier direkt – eine Anmeldung als „Admin“ ist dafür nicht nötig. Danach melden Sie sich mit Ihrem eigenen Namen an.</p>
+      <label class="btn" style="display:inline-flex;cursor:pointer">📂 Datendatei importieren<input type="file" id="in-erststart-import" accept="application/json,.json" style="display:none"></label>
+    </div>`:''}
     <p class="hint" style="margin-top:14px">Beim Tippen erscheinen passende Namen zur Auswahl. Wer einen Benutzernamen hat, kann diesen statt des vollen Namens eingeben. Erstzugang erhältst du von der Leitung. Alle Daten bleiben ausschließlich auf diesem Gerät.</p>
   </div></div>`;
 }
@@ -1085,6 +1096,8 @@ function bindLogin(){
     return;
   }
   document.getElementById('in-person').oninput = e=>{ loginEingabe=e.target.value; };
+  const erststart = document.getElementById('in-erststart-import');
+  if(erststart) erststart.onchange = e=>{ const f=e.target.files[0]; e.target.value=''; if(f && istErststartOhneDaten()) bestandAusDateiImportieren(f); };
   document.getElementById('btn-anmelden').onclick = ()=>{
     const pw = document.getElementById('in-pw').value;
     const {person:p, mehrdeutig} = findePersonFuerLogin(loginEingabe);
@@ -1419,6 +1432,8 @@ function rhsFeldAnwenden(hund, feld, wert){
   else if(feld==='disciplines') hund.sparten = Array.isArray(wert)?wert:[];
   else if(feld==='indicationType') hund.anzeigeart = wert;
 }
+// Dateinamen nur aus einfachen Zeichen bilden – Umlaute und Sonderzeichen führen je nach Gerät zu namenlosen Downloads.
+function dateinameSicher(t){ return String(t||'').replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/Ä/g,'Ae').replace(/Ö/g,'Oe').replace(/Ü/g,'Ue').replace(/ß/g,'ss').replace(/[^A-Za-z0-9._-]+/g,'_').replace(/^_+|_+$/g,'') || 'Hund'; }
 function rhsAnzeigeNormalisieren(v){
   const t = String(v||'').trim().toLowerCase();
   if(!t) return '';
@@ -1488,7 +1503,7 @@ function renderTabHunde(){
       <td>${fuehrer?esc(fuehrer.name):'–'}</td>
       <td>${esc(hundeLebensphase(h.geburtsdatum))||'–'}</td>
       <td>${h.status==='inaktiv'?'<span class="badge off">inaktiv</span>':'<span class="badge ok">aktiv</span>'}</td>
-      <td><button class="btn btn-sm btn-ghost" data-austausch="${h.id}">Austausch</button></td>
+      <td><button class="btn btn-sm btn-ghost" data-austausch="${h.id}">Teamdaten</button></td>
     </tr>`;
   }).join('');
   return `
@@ -1776,39 +1791,44 @@ function bindTabDatensicherung(){
     const blob = new Blob([JSON.stringify(exportDaten,null,2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href=url; a.download = `barry-bestand-${new Date().toISOString().slice(0,10)}.json`;
-    a.click(); URL.revokeObjectURL(url);
+    a.href=url; a.download = `RHS_Sicherung_BARRY_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000);
     zeigeToast('Export gestartet.');
   };
   document.getElementById('in-import').onchange = (e)=>{
-    const file = e.target.files[0]; if(!file) return;
-    const reader = new FileReader();
-    reader.onload = ()=>{
-      try{
-        const parsed = JSON.parse(reader.result);
-        if(!parsed.personen || !Array.isArray(parsed.personen)) throw new Error('Kein gültiges Bestandspaket.');
-        if(parsed.exportInfo && parsed.exportInfo.format && parsed.exportInfo.format!=='barry-bestand') throw new Error('Diese Datei ist kein BARRY-Bestand (Format: '+parsed.exportInfo.format+').');
-        if(parsed.meta && Number(parsed.meta.schemaVersion) > BARRY_SCHEMA_VERSION) throw new Error('Die Datei stammt aus einer neueren BARRY-Version und kann hier noch nicht gelesen werden.');
-        const hatZugang = parsed.personen.some(p=>p && p.id && p.status!=='inaktiv' && p.passwortHash && (p.rollen||[]).includes('admin'));
-        // Harte Sperre: Ohne anmeldefähige Admin-Person wäre nach dem Import niemand mehr in der Lage,
-        // sich anzumelden oder die Sicherheitskopie zurückzuholen (Prüfbericht: Aussperrung).
-        if(!hatZugang) throw new Error('In dieser Datei ist keine anmeldefähige Person mit Admin-Rolle enthalten. Ein Import würde alle Nutzer aussperren und wurde deshalb abgebrochen. Der vorhandene Bestand bleibt unverändert.');
-        const info = parsed.exportInfo ? `\n\nDatei: ${parsed.exportInfo.organisation||'ohne Staffelname'}, exportiert am ${fmtDatum(parsed.exportInfo.exportiertAm)} (BARRY ${parsed.exportInfo.appVersion||'?'}, Schema ${parsed.exportInfo.schemaVersion||'?'})` : '\n\nHinweis: Ältere Datei ohne Exportkennung.';
-        const umfang = `\nInhalt: ${parsed.personen.length} Personen, ${(parsed.hunde||[]).length} Hunde, ${(parsed.termine||[]).length} Termine, ${(parsed.einsaetze||[]).length} Einsätze.`;
-        if(!confirm('Der bestehende Bestand auf diesem Gerät wird ersetzt (der aktuelle Stand wird vorher automatisch als Sicherheitskopie abgelegt). Fortfahren?'+info+umfang)) return;
-        try{ localStorage.setItem(STORAGE_KEY+'-vor-import-backup', JSON.stringify(state)); }catch(e){ /* Backup optional, Import trotzdem versuchen */ }
-        state = migriereState(Object.assign(leererState(), parsed));
-        speichereState();
-        session = null; loginEingabe = ''; loginFehler = '';
-        loginHinweis = 'Der Datenbestand wurde ersetzt. Bitte melden Sie sich jetzt mit einer Person aus dem neuen Bestand an (Name oder Benutzername). Zugänge aus dem vorherigen Bestand – z. B. „Admin“ – gelten nicht mehr. Bei importierten Personen gilt das Startpasswort, das Ihnen die Leitung mitgeteilt hat.';
-        zeigeToast('Bestand importiert. Vorheriger Stand wurde als Sicherheitskopie abgelegt.');
-        render();
-      }catch(err){
-        alert('Diese Datei konnte nicht gelesen werden: '+err.message);
-      }
-    };
-    reader.readAsText(file);
+    const file = e.target.files[0]; e.target.value=''; if(!file) return;
+    bestandAusDateiImportieren(file);
   };
+}
+
+/* Gemeinsame Importlogik für Datensicherung und Erststart – alle Schutzprüfungen an einer Stelle. */
+function bestandAusDateiImportieren(file){
+    const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const parsed = JSON.parse(reader.result);
+      if(!parsed.personen || !Array.isArray(parsed.personen)) throw new Error('Kein gültiges Bestandspaket.');
+      if(parsed.exportInfo && parsed.exportInfo.format && parsed.exportInfo.format!=='barry-bestand') throw new Error('Diese Datei ist kein BARRY-Bestand (Format: '+parsed.exportInfo.format+').');
+      if(parsed.meta && Number(parsed.meta.schemaVersion) > BARRY_SCHEMA_VERSION) throw new Error('Die Datei stammt aus einer neueren BARRY-Version und kann hier noch nicht gelesen werden.');
+      const hatZugang = parsed.personen.some(p=>p && p.id && p.status!=='inaktiv' && p.passwortHash && (p.rollen||[]).includes('admin'));
+      // Harte Sperre: Ohne anmeldefähige Admin-Person wäre nach dem Import niemand mehr in der Lage,
+      // sich anzumelden oder die Sicherheitskopie zurückzuholen (Prüfbericht: Aussperrung).
+      if(!hatZugang) throw new Error('In dieser Datei ist keine anmeldefähige Person mit Admin-Rolle enthalten. Ein Import würde alle Nutzer aussperren und wurde deshalb abgebrochen. Der vorhandene Bestand bleibt unverändert.');
+      const info = parsed.exportInfo ? `\n\nDatei: ${parsed.exportInfo.organisation||'ohne Staffelname'}, exportiert am ${fmtDatum(parsed.exportInfo.exportiertAm)} (BARRY ${parsed.exportInfo.appVersion||'?'}, Schema ${parsed.exportInfo.schemaVersion||'?'})` : '\n\nHinweis: Ältere Datei ohne Exportkennung.';
+      const umfang = `\nInhalt: ${parsed.personen.length} Personen, ${(parsed.hunde||[]).length} Hunde, ${(parsed.termine||[]).length} Termine, ${(parsed.einsaetze||[]).length} Einsätze.`;
+      if(!confirm('Der bestehende Bestand auf diesem Gerät wird ersetzt (der aktuelle Stand wird vorher automatisch als Sicherheitskopie abgelegt). Fortfahren?'+info+umfang)) return;
+      try{ localStorage.setItem(STORAGE_KEY+'-vor-import-backup', JSON.stringify(state)); }catch(e){ /* Backup optional, Import trotzdem versuchen */ }
+      state = migriereState(Object.assign(leererState(), parsed));
+      speichereState();
+      session = null; loginEingabe = ''; loginFehler = '';
+      loginHinweis = 'Der Datenbestand wurde ersetzt. Bitte melden Sie sich jetzt mit einer Person aus dem neuen Bestand an (Name oder Benutzername). Zugänge aus dem vorherigen Bestand – z. B. „Admin“ – gelten nicht mehr. Bei importierten Personen gilt das Startpasswort, das Ihnen die Leitung mitgeteilt hat.';
+      zeigeToast('Bestand importiert. Vorheriger Stand wurde als Sicherheitskopie abgelegt.');
+      render();
+    }catch(err){
+      alert('Diese Datei konnte nicht gelesen werden: '+err.message);
+    }
+  };
+  reader.readAsText(file);
 }
 
 /* =========================================================
@@ -6181,12 +6201,12 @@ function renderModalAustausch(){
         </tbody></table>
       </div>
       <div class="card card-pad" style="margin-bottom:16px">
-        <h3>Austauschpaket exportieren</h3>
+        <h3>Teamdaten exportieren</h3>
         <p class="hint">Erzeugt eine Austauschdatei für dieses Team, die in einer der Assistenten-Apps eingelesen werden kann.</p>
-        <button class="btn btn-primary" id="ax-export">Austauschpaket exportieren</button>
+        <button class="btn btn-primary" id="ax-export">Teamdaten exportieren</button>
       </div>
       <div class="card card-pad">
-        <h3>Austauschpaket einlesen</h3>
+        <h3>Teamdaten importieren</h3>
         <p class="hint">Eine Austauschdatei aus einer Assistenten-App einlesen. Neuere Angaben werden übernommen; bei gleichzeitig geänderten Feldern wirst du gefragt. Hundeführer/in und Staffel werden nur angezeigt, nicht automatisch verändert.</p>
         <input type="file" id="ax-datei" accept="application/json">
         <button class="btn" id="ax-einlesen" style="margin-top:10px">Einlesen</button>
@@ -6208,9 +6228,9 @@ function bindModalAustausch(){
     const blob = new Blob([JSON.stringify(paket,null,2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `RHS_Austausch_${hund.name}_${new Date().toISOString().slice(0,10)}.json`;
-    a.click(); URL.revokeObjectURL(url);
-    zeigeToast('Austauschpaket exportiert.');
+    a.href = url; a.download = `RHS_Teamdaten_BARRY_${dateinameSicher(hund.name)}_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000);
+    zeigeToast('Teamdaten exportiert.');
   };
   document.getElementById('ax-einlesen').onclick = ()=>{
     const datei = document.getElementById('ax-datei').files[0];
@@ -6241,7 +6261,7 @@ function bindModalAustausch(){
         if(rec.id && rec.id!==hund.rhsTeamId){ hund.rhsVerknuepfteTeamIds = hund.rhsVerknuepfteTeamIds||[]; if(!hund.rhsVerknuepfteTeamIds.includes(rec.id)) hund.rhsVerknuepfteTeamIds.push(rec.id); }
         speichereState();
         modal.austauschErgebnis = ergebnis;
-        zeigeToast('Austauschpaket eingelesen.');
+        zeigeToast('Teamdaten importiert.');
         render();
       }catch(err){
         alert('Datei konnte nicht eingelesen werden: '+err.message);
@@ -6398,7 +6418,7 @@ const HILFE_ARTIKEL = [
   {id:"verwaltung-rechte", kategorie:"Verwaltung", titel:"Rollen und individuelle Zusatzrechte vergeben", rollen:["leitung"], text:"\n<p>Beim Anlegen oder Bearbeiten einer Person werden die Rollen per H\u00e4kchen vergeben. Zus\u00e4tzlich lassen\nsich unter <strong>Rollen &amp; Rechte</strong> einzelne, frei benannte Zusatzrechte definieren; die\nbeiden vorbelegten Eintr\u00e4ge \u201eKalender verwalten\" und \u201eAusbildung verwalten\" wirken sich tats\u00e4chlich auf\ndie Berechtigung aus, auch wenn die Person keine Ausbilder-Rolle hat.</p>\n"},
   {id:"datensicherung", kategorie:"Daten sichern & teilen", titel:"Backup exportieren und einspielen", rollen:["leitung"], text:"\n<p>Unter <strong>Verwaltung \u2192 Datensicherung</strong> l\u00e4sst sich der komplette Datenbestand als eine\neinzelne Datei <strong>exportieren</strong> \u2013 das sollte regelm\u00e4\u00dfig geschehen, am besten vor gr\u00f6\u00dferen\n\u00c4nderungen. Beim <strong>Import</strong> einer solchen Datei zeigt BARRY vorher eine Vorschau (Inhalt,\nHerkunft, Datum) und legt automatisch eine Sicherheitskopie des bisherigen Standes an, die sich bei\nBedarf mit einem Klick wiederherstellen l\u00e4sst. Eine Datei ohne anmeldef\u00e4hige Admin-Person wird\ngrunds\u00e4tzlich abgelehnt, damit sich niemand versehentlich aussperrt.</p>\n"},
   {id:"keine-automatische-sync", kategorie:"Daten sichern & teilen", titel:"Wichtig: Keine automatische Synchronisation zwischen Ger\u00e4ten", rollen:["mitglied", "ausbilder", "leitung"], text:"\n<p>BARRY speichert alle Daten <strong>ausschlie\u00dflich lokal auf dem jeweiligen Ger\u00e4t</strong>. Es gibt\nkeinen Server im Hintergrund, der die Daten automatisch zwischen mehreren Handys oder Tablets abgleicht.\nMeldet sich jemand auf einem <em>anderen</em> Ger\u00e4t an, sieht diese Person eine eigenst\u00e4ndige,\nunabh\u00e4ngige Kopie \u2013 neue Eintr\u00e4ge auf dem einen Ger\u00e4t erscheinen nicht von selbst auf dem anderen.</p>\n<p><strong>F\u00fcr die Praxis bedeutet das:</strong> BARRY funktioniert am besten auf einem\n<strong>gemeinsam genutzten Ger\u00e4t</strong> (z. B. ein Staffel-Tablet), auf dem sich alle mit dem\neigenen Login anmelden. Soll BARRY auf mehreren eigenen Handys parallel genutzt werden, m\u00fcssen Daten\nbewusst per Export/Import \u00fcbertragen werden \u2013 siehe Artikel \u201eBackup exportieren und einspielen\".</p>\n"},
-  {id:"austauschpaket", kategorie:"Daten sichern & teilen", titel:"Team-Stammdaten mit eigenst\u00e4ndigen Apps austauschen", rollen:["ausbilder", "leitung"], text:"\n<p>F\u00fcr einzelne Hundeteams l\u00e4sst sich unter <strong>Verwaltung \u2192 Hunde \u2192 Austausch</strong> ein kleines\nAustauschpaket (Name, Rasse, Geburtsdatum, Sparten, Anzeigeart) exportieren und in eine der\neigenst\u00e4ndigen RHS-Apps (z. B. Tr\u00fcmmersuchassistent) importieren, und umgekehrt. Es handelt sich\nbewusst nur um Stammdaten, nicht um Trainings- oder Einsatzdaten; ein Import zeigt vorher immer eine\nVorschau inklusive Warnung, falls Name oder Hundef\u00fchrer/-in nicht zum gew\u00e4hlten Team passen.</p>\n"},
+  {id:"austauschpaket", kategorie:"Daten sichern & teilen", titel:"Team-Stammdaten mit eigenst\u00e4ndigen Apps austauschen", rollen:["ausbilder", "leitung"], text:"\n<p>F\u00fcr einzelne Hundeteams l\u00e4sst sich unter <strong>Verwaltung \u2192 Hunde \u2192 Teamdaten</strong> eine kleine\nTeamdaten-Datei (Name, Rasse, Geburtsdatum, Sparten, Anzeigeart) exportieren und in eine der\neigenst\u00e4ndigen RHS-Apps (z. B. Tr\u00fcmmersuchassistent) importieren, und umgekehrt. Es handelt sich\nbewusst nur um Stammdaten, nicht um Trainings- oder Einsatzdaten; ein Import zeigt vorher immer eine\nVorschau inklusive Warnung, falls Name oder Hundef\u00fchrer/-in nicht zum gew\u00e4hlten Team passen.</p>\n"},
   {id:"pwa-installation", kategorie:"Daten sichern & teilen", titel:"BARRY als App installieren", rollen:["leitung"], text:"\n<p>Wird BARRY \u00fcber eine Internetadresse (nicht als lokal ge\u00f6ffnete Datei) bereitgestellt, l\u00e4sst sich die\nApp auf dem Startbildschirm installieren: Android/Chrome \u00fcber \u201eApp installieren\", iPhone/Safari \u00fcber\n\u201eZum Home-Bildschirm hinzuf\u00fcgen\", Windows \u00fcber das Installationssymbol in der Adressleiste. Danach\nstartet BARRY auch ohne Internetverbindung. Die Daten bleiben dabei weiterhin lokal auf dem jeweiligen\nGer\u00e4t \u2013 siehe \u201eWichtig: Keine automatische Synchronisation zwischen Ger\u00e4ten\".</p>\n"},
 ];
 

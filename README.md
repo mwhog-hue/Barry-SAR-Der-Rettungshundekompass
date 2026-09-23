@@ -30,7 +30,7 @@ Offline-Anwendung für Organisation, Ausbildung, Trainingsdokumentation und Eins
 ## Update auf eine neue Version
 
 1. `index.html` ersetzen.
-2. In `sw.js` den Wert `CACHE_VERSION` erhöhen, z. B. `barry-1.7` → `barry-1.8`.
+2. In `sw.js` den Wert `CACHE_VERSION` erhöhen, z. B. `barry-1.8` → `barry-1.9`.
    Ohne diese Änderung zeigen bereits installierte Geräte weiterhin die alte Version.
 
 ## Gemeinsamer Datenaustausch
