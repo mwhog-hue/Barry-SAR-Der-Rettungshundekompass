@@ -4625,6 +4625,7 @@ function renderWissenApps(person){
   const gruppe=(titel, rolle, hinweis)=>{ const g=liste.filter(a=>a.rolle===rolle); return g.length?`<h3 style="margin:14px 0 4px">${titel}</h3>${hinweis?`<p class="hint" style="margin:0 0 8px">${hinweis}</p>`:''}${g.map(karte).join('')}`:''; };
   return `
     <p class="lead">Die eigenständigen Apps der Staffel. Sie laufen ohne Konto im Browser und lassen sich wie BARRY installieren. Zum Öffnen ist Internet nötig; danach funktionieren sie weitgehend offline.</p>
+    <div class="hint" style="background:#eef4fb;border:1px solid #b9cde6;border-radius:8px;padding:8px 10px;margin:0 0 12px"><strong>Datenhaltung:</strong> Die Apps synchronisieren sich <strong>nicht</strong> untereinander. Die weiteren Apps speichern ausschließlich lokal auf dem jeweiligen Gerät und haben keine Verbindung zu einem Server; ein Austausch ist nur manuell per Datei möglich. BARRY ist dagegen für einen verbandsinternen Datenabgleich vorgesehen (in Planung; derzeit speichert auch BARRY nur lokal).</div>
     ${gruppe('Ergänzen BARRY','ergaenzt','Für Aufgaben, die BARRY bewusst nicht selbst übernimmt. Ergebnisse kommen über Übergabedateien zurück.')}
     ${gruppe('Diese App','barry','')}
     ${gruppe('Einzel-Apps, deren Inhalte auch in BARRY stehen','enthalten','In den eigenen Apps übersichtlicher aufgebaut. Daten werden zwischen den Einzel-Apps und BARRY nicht automatisch abgeglichen.')}
